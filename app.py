@@ -29,23 +29,30 @@ BLUEPRINT = {
 # --- 2. CORE ROBUST FUNCTIONS ---
 
 def find_header_row(df_preview):
-    """Scans rows to find where the actual table starts."""
+    """
+    Scans rows to find where the actual table starts.
+    Fix: Added explicit string conversion to prevent join errors.
+    """
     for i, row in df_preview.iterrows():
-        row_str = " ".join(row.astype(str).values).lower()
-        if "isin" in row_str or "instrument" in row_str or "stock name" in row_str:
+        # Cleanly convert all row items to strings before joining
+        row_values = [str(val).lower() if val is not None else "" for val in row.values]
+        row_str = " ".join(row_values)
+        
+        if "isin" in row_str or "instrument" in row_str or "stock name" in row_str or "issuer" in row_str:
             return i
     return 0
 
 def load_any_file(uploaded_file):
     """Handles dynamic headers and different file types."""
     try:
+        # Read a small chunk first to find the header
         if uploaded_file.name.endswith('csv'):
-            preview = pd.read_csv(uploaded_file, nrows=20, header=None)
+            preview = pd.read_csv(uploaded_file, nrows=30, header=None)
             header_idx = find_header_row(preview)
             uploaded_file.seek(0)
             df = pd.read_csv(uploaded_file, skiprows=header_idx)
         else:
-            preview = pd.read_excel(uploaded_file, nrows=20, header=None)
+            preview = pd.read_excel(uploaded_file, nrows=30, header=None)
             header_idx = find_header_row(preview)
             df = pd.read_excel(uploaded_file, skiprows=header_idx)
         return df
@@ -55,9 +62,11 @@ def load_any_file(uploaded_file):
 
 def normalize_dataframe(df):
     """Clean the raw data by stripping headers and formatting noise."""
+    # Convert column names to string and clean
     df.columns = [str(c).replace('\n', ' ').strip() for c in df.columns]
     df = df.rename(columns=BLUEPRINT["mapping"])
     
+    # Weight column recovery
     if 'Weight (%)' not in df.columns:
         for col in df.columns:
             if '%' in col or 'assets' in col.lower():
@@ -65,13 +74,17 @@ def normalize_dataframe(df):
                 break
 
     cols_to_keep = [c for c in BLUEPRINT["required_cols"] if c in df.columns]
-    df = df[cols_to_keep]
+    df = df[cols_to_keep].copy()
 
     if not df.empty:
-        df = df.dropna(subset=[df.columns[0]])
+        # Ensure 'Stock Name' is treated as string for keyword filtering
+        stock_col = df.columns[0]
+        df = df.dropna(subset=[stock_col])
+        
         noise_keywords = ['total', 'equity', 'listed', 'subtotal', 'grand', 'isin', 'instrument', 'cash']
-        df = df[~df[df.columns[0]].astype(str).str.contains('|'.join(noise_keywords), case=False, na=False)]
+        df = df[~df[stock_col].astype(str).str.contains('|'.join(noise_keywords), case=False, na=False)]
 
+        # Clean numeric Weightage
         if 'Weight (%)' in df.columns:
             df['Weight (%)'] = (
                 df['Weight (%)'].astype(str)
@@ -92,22 +105,23 @@ def harmonized_fuzzy_match(df_dict):
         return df_dict
         
     all_stocks = pd.concat(all_stocks_list)
-    unique_stocks = all_stocks.unique().tolist()
+    unique_stocks = all_stocks.dropna().unique().tolist()
     
     master_map = {}
     processed_list = []
 
     for stock in unique_stocks:
+        stock_str = str(stock)
         if not processed_list:
-            master_map[stock] = stock
-            processed_list.append(stock)
+            master_map[stock] = stock_str
+            processed_list.append(stock_str)
         else:
-            match, score = process.extractOne(stock, processed_list, scorer=fuzz.token_sort_ratio)
+            match, score = process.extractOne(stock_str, processed_list, scorer=fuzz.token_sort_ratio)
             if score >= 90:
                 master_map[stock] = match
             else:
-                master_map[stock] = stock
-                processed_list.append(stock)
+                master_map[stock] = stock_str
+                processed_list.append(stock_str)
                 
     for name in df_dict:
         if 'Stock Name' in df_dict[name].columns:
@@ -126,7 +140,6 @@ def main():
 
     with st.sidebar:
         st.header("Upload Center")
-        st.info("Upload CSV/Excel files. The engine will automatically detect headers.")
         files = st.file_uploader("Drop files here", accept_multiple_files=True, type=['csv', 'xlsx'])
         
         if st.button("Process & Analyze"):
@@ -135,10 +148,15 @@ def main():
                 for f in files:
                     raw_df = load_any_file(f)
                     if raw_df is not None:
-                        temp_dict[f.name] = normalize_dataframe(raw_df)
+                        normalized = normalize_dataframe(raw_df)
+                        if not normalized.empty:
+                            temp_dict[f.name] = normalized
                 
-                st.session_state.normalized_dfs = harmonized_fuzzy_match(temp_dict)
-                st.success(f"Processed {len(st.session_state.normalized_dfs)} portfolios.")
+                if temp_dict:
+                    st.session_state.normalized_dfs = harmonized_fuzzy_match(temp_dict)
+                    st.success(f"Successfully processed {len(st.session_state.normalized_dfs)} portfolios.")
+                else:
+                    st.error("No valid data found in the uploaded files.")
             else:
                 st.error("Please upload files first.")
 
@@ -147,7 +165,6 @@ def main():
         return
 
     tab_overlap, tab_drift, tab_sector = st.tabs(["Overlap Matrix", "Drift Tracker", "Concentration & Sector"])
-
     funds = list(st.session_state.normalized_dfs.keys())
 
     with tab_overlap:
@@ -156,11 +173,11 @@ def main():
             matrix = pd.DataFrame(index=funds, columns=funds)
             for f1 in funds:
                 for f2 in funds:
-                    s1 = set(st.session_state.normalized_dfs[f1]['Stock Name'])
-                    s2 = set(st.session_state.normalized_dfs[f2]['Stock Name'])
+                    s1 = set(st.session_state.normalized_dfs[f1]['Stock Name'].astype(str))
+                    s2 = set(st.session_state.normalized_dfs[f2]['Stock Name'].astype(str))
                     intersect = len(s1.intersection(s2))
                     union = len(s1.union(s2))
-                    matrix.loc[f1, f2] = round((intersect / union) * 100, 2)
+                    matrix.loc[f1, f2] = round((intersect / union) * 100, 2) if union > 0 else 0
             
             fig = px.imshow(matrix.astype(float), text_auto=True, color_continuous_scale='Viridis')
             st.plotly_chart(fig, width="stretch") 
@@ -193,20 +210,15 @@ def main():
 
     with tab_sector:
         st.header("Sector & Global Concentration")
+        all_data = pd.concat(list(st.session_state.normalized_dfs.values()))
         
-        dfs_to_concat = list(st.session_state.normalized_dfs.values())
-        if dfs_to_concat:
-            all_data = pd.concat(dfs_to_concat)
-            
-            sector_agg = all_data.groupby('Sector')['Weight (%)'].sum().reset_index()
-            fig_sector = px.pie(sector_agg, values='Weight (%)', names='Sector', hole=0.4, title="Overall Sector Distribution")
-            st.plotly_chart(fig_sector, width="stretch") 
-            
-            stock_agg = all_data.groupby(['Stock Name', 'Sector'])['Weight (%)'].agg(['sum', 'count']).reset_index()
-            stock_agg.columns = ['Stock Name', 'Sector', 'Total Weight (%)', 'Fund Count']
-            st.dataframe(stock_agg.sort_values('Total Weight (%)', ascending=False), width="stretch")
-        else:
-            st.error("No valid data available for sector aggregation.")
+        sector_agg = all_data.groupby('Sector')['Weight (%)'].sum().reset_index()
+        fig_sector = px.pie(sector_agg, values='Weight (%)', names='Sector', hole=0.4, title="Overall Sector Distribution")
+        st.plotly_chart(fig_sector, width="stretch") 
+        
+        stock_agg = all_data.groupby(['Stock Name', 'Sector'])['Weight (%)'].agg(['sum', 'count']).reset_index()
+        stock_agg.columns = ['Stock Name', 'Sector', 'Total Weight (%)', 'Fund Count']
+        st.dataframe(stock_agg.sort_values('Total Weight (%)', ascending=False), width="stretch")
 
 if __name__ == "__main__":
     main()
