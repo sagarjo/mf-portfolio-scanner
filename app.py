@@ -8,7 +8,6 @@ import re
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="MF Portfolio Pro-Analyzer", layout="wide")
 
-# Expanded Blueprint to cover common variations in Indian/Global MF statements
 BLUEPRINT = {
     "required_cols": ['Stock Name', 'Weight (%)', 'Sector'],
     "mapping": {
@@ -30,10 +29,7 @@ BLUEPRINT = {
 # --- 2. CORE ROBUST FUNCTIONS ---
 
 def find_header_row(df_preview):
-    """
-    Scans the first 20 rows of a file to find where the actual table starts.
-    Looks for standard keywords like 'ISIN' or 'Instrument'.
-    """
+    """Scans rows to find where the actual table starts."""
     for i, row in df_preview.iterrows():
         row_str = " ".join(row.astype(str).values).lower()
         if "isin" in row_str or "instrument" in row_str or "stock name" in row_str:
@@ -43,7 +39,6 @@ def find_header_row(df_preview):
 def load_any_file(uploaded_file):
     """Handles dynamic headers and different file types."""
     try:
-        # Step 1: Read preview to find table start
         if uploaded_file.name.endswith('csv'):
             preview = pd.read_csv(uploaded_file, nrows=20, header=None)
             header_idx = find_header_row(preview)
@@ -59,34 +54,25 @@ def load_any_file(uploaded_file):
         return None
 
 def normalize_dataframe(df):
-    """Clean the raw data by stripping headers, sub-headings, and formatting noise."""
-    # 1. Clean column names (Remove newlines and extra spaces)
+    """Clean the raw data by stripping headers and formatting noise."""
     df.columns = [str(c).replace('\n', ' ').strip() for c in df.columns]
-    
-    # 2. Map to our Blueprint
     df = df.rename(columns=BLUEPRINT["mapping"])
     
-    # 3. Dynamic Column Recovery: If 'Weight (%)' is missing, look for clues
     if 'Weight (%)' not in df.columns:
         for col in df.columns:
             if '%' in col or 'assets' in col.lower():
                 df = df.rename(columns={col: 'Weight (%)'})
                 break
 
-    # 4. Filter for only required columns that actually exist
     cols_to_keep = [c for c in BLUEPRINT["required_cols"] if c in df.columns]
     df = df[cols_to_keep]
 
-    # 5. Remove Noise Rows (Category headers like 'Equity', 'Total', etc.)
     if not df.empty:
-        # Drop rows where Stock Name is missing
         df = df.dropna(subset=[df.columns[0]])
         noise_keywords = ['total', 'equity', 'listed', 'subtotal', 'grand', 'isin', 'instrument', 'cash']
         df = df[~df[df.columns[0]].astype(str).str.contains('|'.join(noise_keywords), case=False, na=False)]
 
-        # 6. Clean Numeric Weightage
         if 'Weight (%)' in df.columns:
-            # Remove symbols and keep only digits/dots
             df['Weight (%)'] = (
                 df['Weight (%)'].astype(str)
                 .str.replace('%', '', regex=False)
@@ -98,7 +84,14 @@ def normalize_dataframe(df):
 
 def harmonized_fuzzy_match(df_dict):
     """Ensures stock names are identical across all uploaded files."""
-    all_stocks = pd.concat([df['Stock Name'] for df in df_dict.values() if 'Stock Name' in df.columns])
+    if not df_dict:
+        return {}
+        
+    all_stocks_list = [df['Stock Name'] for df in df_dict.values() if 'Stock Name' in df.columns]
+    if not all_stocks_list:
+        return df_dict
+        
+    all_stocks = pd.concat(all_stocks_list)
     unique_stocks = all_stocks.unique().tolist()
     
     master_map = {}
@@ -149,6 +142,7 @@ def main():
             else:
                 st.error("Please upload files first.")
 
+    # [span_8](start_span)CRITICAL FIX: Ensure app doesn't crash if nothing is processed yet[span_8](end_span)
     if not st.session_state.normalized_dfs:
         st.warning("Upload data from the sidebar to begin.")
         return
@@ -170,7 +164,7 @@ def main():
                     matrix.loc[f1, f2] = round((intersect / union) * 100, 2)
             
             fig = px.imshow(matrix.astype(float), text_auto=True, color_continuous_scale='Viridis')
-            st.plotly_chart(fig, use_container_width=True)
+            [span_9](start_span)[span_10](start_span)st.plotly_chart(fig, width="stretch") # Updated width[span_9](end_span)[span_10](end_span)
         else:
             st.info("Upload at least 2 funds to see the overlap matrix.")
 
@@ -192,20 +186,29 @@ def main():
             c2.metric("Complete Exits", len(exits))
             
             drift_merge = pd.merge(curr_df, prev_df, on='Stock Name', how='inner', suffixes=('_curr', '_prev'))
-            drift_merge['Change'] = drift_merge['Weight (%)_curr'] - drift_merge['Weight (%)_prev']
-            st.dataframe(drift_merge[['Stock Name', 'Weight (%)_prev', 'Weight (%)_curr', 'Change']].sort_values('Change', ascending=False), use_container_width=True)
+            if not drift_merge.empty:
+                drift_merge['Change'] = drift_merge['Weight (%)_curr'] - drift_merge['Weight (%)_prev']
+                st.dataframe(drift_merge[['Stock Name', 'Weight (%)_prev', 'Weight (%)_curr', 'Change']].sort_values('Change', ascending=False), width="stretch")
+            else:
+                st.info("No common stocks found to track drift.")
 
     with tab_sector:
         st.header("Sector & Global Concentration")
-        all_data = pd.concat(st.session_state.normalized_dfs.values())
         
-        sector_agg = all_data.groupby('Sector')['Weight (%)'].sum().reset_index()
-        fig_sector = px.pie(sector_agg, values='Weight (%)', names='Sector', hole=0.4, title="Overall Sector Distribution")
-        st.plotly_chart(fig_sector, use_container_width=True)
-        
-        stock_agg = all_data.groupby(['Stock Name', 'Sector'])['Weight (%)'].agg(['sum', 'count']).reset_index()
-        stock_agg.columns = ['Stock Name', 'Sector', 'Total Weight (%)', 'Fund Count']
-        st.dataframe(stock_agg.sort_values('Total Weight (%)', ascending=False), use_container_width=True)
+        # [span_11](start_span)CRITICAL FIX: Ensure concat list is not empty[span_11](end_span)
+        dfs_to_concat = list(st.session_state.normalized_dfs.values())
+        if dfs_to_concat:
+            all_data = pd.concat(dfs_to_concat)
+            
+            sector_agg = all_data.groupby('Sector')['Weight (%)'].sum().reset_index()
+            fig_sector = px.pie(sector_agg, values='Weight (%)', names='Sector', hole=0.4, title="Overall Sector Distribution")
+            [span_12](start_span)st.plotly_chart(fig_sector, width="stretch") # Updated width[span_12](end_span)
+            
+            stock_agg = all_data.groupby(['Stock Name', 'Sector'])['Weight (%)'].agg(['sum', 'count']).reset_index()
+            stock_agg.columns = ['Stock Name', 'Sector', 'Total Weight (%)', 'Fund Count']
+            st.dataframe(stock_agg.sort_values('Total Weight (%)', ascending=False), width="stretch")
+        else:
+            st.error("No valid data available for sector aggregation.")
 
 if __name__ == "__main__":
     main()
