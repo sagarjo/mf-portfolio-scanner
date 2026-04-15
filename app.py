@@ -142,7 +142,6 @@ def main():
             else:
                 st.error("Please upload files first.")
 
-    # [span_8](start_span)CRITICAL FIX: Ensure app doesn't crash if nothing is processed yet[span_8](end_span)
     if not st.session_state.normalized_dfs:
         st.warning("Upload data from the sidebar to begin.")
         return
@@ -164,7 +163,7 @@ def main():
                     matrix.loc[f1, f2] = round((intersect / union) * 100, 2)
             
             fig = px.imshow(matrix.astype(float), text_auto=True, color_continuous_scale='Viridis')
-            [span_9](start_span)[span_10](start_span)st.plotly_chart(fig, width="stretch") # Updated width[span_9](end_span)[span_10](end_span)
+            st.plotly_chart(fig, width="stretch") 
         else:
             st.info("Upload at least 2 funds to see the overlap matrix.")
 
@@ -195,14 +194,13 @@ def main():
     with tab_sector:
         st.header("Sector & Global Concentration")
         
-        # [span_11](start_span)CRITICAL FIX: Ensure concat list is not empty[span_11](end_span)
         dfs_to_concat = list(st.session_state.normalized_dfs.values())
         if dfs_to_concat:
             all_data = pd.concat(dfs_to_concat)
             
             sector_agg = all_data.groupby('Sector')['Weight (%)'].sum().reset_index()
             fig_sector = px.pie(sector_agg, values='Weight (%)', names='Sector', hole=0.4, title="Overall Sector Distribution")
-            [span_12](start_span)st.plotly_chart(fig_sector, width="stretch") # Updated width[span_12](end_span)
+            st.plotly_chart(fig_sector, width="stretch") 
             
             stock_agg = all_data.groupby(['Stock Name', 'Sector'])['Weight (%)'].agg(['sum', 'count']).reset_index()
             stock_agg.columns = ['Stock Name', 'Sector', 'Total Weight (%)', 'Fund Count']
