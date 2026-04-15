@@ -26,7 +26,7 @@ def find_header_row(df_preview):
         row_values = [str(val).lower() if val is not None else "" for val in row.values]
         row_str = " ".join(row_values)
         if any(key in row_str for key in ["isin", "instrument", "stock name", "issuer"]):
-            [span_1](start_span)return i[span_1](end_span)
+            return i
     return 0
 
 def load_and_normalize(uploaded_file):
@@ -40,7 +40,6 @@ def load_and_normalize(uploaded_file):
         df.columns = [str(c).replace('\n', ' ').strip() for c in df.columns]
         df = df.rename(columns=BLUEPRINT["mapping"])
         
-        # Recovery for Weight column if mapping fails
         if 'Weight (%)' not in df.columns:
             for col in df.columns:
                 if '%' in col or 'assets' in col.lower():
@@ -54,7 +53,7 @@ def load_and_normalize(uploaded_file):
         return df.reset_index(drop=True)
     except Exception as e:
         st.error(f"Error processing {uploaded_file.name}: {e}")
-        [span_2](start_span)return None[span_2](end_span)
+        return None
 
 def harmonized_fuzzy_match(df_dict):
     """Standardizes stock names across all portfolios to ensure analysis accuracy."""
@@ -77,14 +76,13 @@ def harmonized_fuzzy_match(df_dict):
     for name in df_dict:
         if 'Stock Name' in df_dict[name].columns:
             df_dict[name]['Stock Name'] = df_dict[name]['Stock Name'].map(master_map)
-    [span_3](start_span)return df_dict[span_3](end_span)
+    return df_dict
 
 # --- 3. UI LOGIC ---
 
 def main():
     st.title("📈 Mutual Fund Portfolio Pro-Analyzer")
     
-    # NEW: Analysis Goal Selector
     analysis_goal = st.sidebar.radio(
         "What is your analysis goal?",
         ["Time-Series (Same Fund, Different Months)", "Cross-Portfolio (Compare Different AMCs)"],
@@ -111,17 +109,15 @@ def main():
 
     funds = list(st.session_state.normalized_dfs.keys())
 
-    # --- MODE 1: TIME-SERIES ---
     if analysis_goal == "Time-Series (Same Fund, Different Months)":
         st.header("🕒 Month-on-Month Performance & Churn")
         c1, c2 = st.columns(2)
-        curr_name = c1.selectbox("Current Month File", funds, index=0)
-        prev_name = c2.selectbox("Previous Month File", funds, index=min(1, len(funds)-1))
+        curr_name = c1.selectbox("Select Current Month", funds, index=0)
+        prev_name = c2.selectbox("Select Previous Month", funds, index=min(1, len(funds)-1))
 
         if curr_name != prev_name:
             curr_df, prev_df = st.session_state.normalized_dfs[curr_name], st.session_state.normalized_dfs[prev_name]
             
-            # Stock Drift
             new_in = set(curr_df['Stock Name']) - set(prev_df['Stock Name'])
             exits = set(prev_df['Stock Name']) - set(curr_df['Stock Name'])
             
@@ -129,7 +125,6 @@ def main():
             m1.metric("New Stock Entries", len(new_in))
             m2.metric("Complete Exits", len(exits))
 
-            # Sector Drift (Where is the AMC increasing bets?)
             st.subheader("Sectoral Weightage Shifts")
             curr_sec = curr_df.groupby('Sector')['Weight (%)'].sum()
             prev_sec = prev_df.groupby('Sector')['Weight (%)'].sum()
@@ -139,27 +134,24 @@ def main():
             fig = px.bar(sec_drift.sort_values('Weight Change (%)'), x='Weight Change (%)', y='Sector', 
                          orientation='h', color='Weight Change (%)', color_continuous_scale='RdYlGn',
                          title="Where the AMC Increased/Decreased Bets")
-            [span_4](start_span)st.plotly_chart(fig, width="stretch")[span_4](end_span)
+            st.plotly_chart(fig, width="stretch")
 
-    # --- MODE 2: CROSS-PORTFOLIO ---
     else:
         st.header("🤝 Cross-AMC Comparison & Shared Conviction")
         
-        # Overlap Matrix
         if len(funds) > 1:
             matrix = pd.DataFrame(index=funds, columns=funds)
             for f1 in funds:
                 for f2 in funds:
                     s1, s2 = set(st.session_state.normalized_dfs[f1]['Stock Name']), set(st.session_state.normalized_dfs[f2]['Stock Name'])
                     matrix.loc[f1, f2] = round((len(s1 & s2) / len(s1 | s2)) * 100, 2) if (s1 | s2) else 0
-            [span_5](start_span)st.plotly_chart(px.imshow(matrix.astype(float), text_auto=True, title="Portfolio Overlap %"), width="stretch")[span_5](end_span)
+            st.plotly_chart(px.imshow(matrix.astype(float), text_auto=True, title="Portfolio Overlap %"), width="stretch")
 
-        # Common Bets (High Conviction Stocks)
         st.subheader("Common Holdings Across Different AMCs")
         all_data = pd.concat(st.session_state.normalized_dfs.values())
         common = all_data.groupby(['Stock Name', 'Sector']).agg({'Weight (%)': 'sum', 'Stock Name': 'count'})
         common.columns = ['Total Aggregated Weight (%)', 'Number of AMCs Holding This']
-        [span_6](start_span)st.dataframe(common[common['Number of AMCs Holding This'] > 1].sort_values('Number of AMCs Holding This', ascending=False), width="stretch")[span_6](end_span)
+        st.dataframe(common[common['Number of AMCs Holding This'] > 1].sort_values('Number of AMCs Holding This', ascending=False), width="stretch")
 
 if __name__ == "__main__":
     main()
