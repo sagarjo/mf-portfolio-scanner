@@ -20,46 +20,39 @@ BLUEPRINT = {
 # --- 2. CORE ENGINE FUNCTIONS ---
 
 def find_header_row(df_preview):
-    """Scans for headers. Now strictly looks for ISIN as an anchor."""
+    """Scans for headers using ISIN as the anchor to avoid noise."""
     for i, row in df_preview.iterrows():
         row_values = [str(val).lower() if val is not None else "" for val in row.values]
         row_str = " ".join(row_values)
-        # ISIN is the most reliable anchor for the start of the data table
         if "isin" in row_str:
             return i
     return 0
 
 def load_and_normalize(uploaded_file):
     try:
-        # Initial read to find the header
         if uploaded_file.name.endswith('csv'):
             df = pd.read_csv(uploaded_file, skiprows=find_header_row(pd.read_csv(uploaded_file, nrows=30, header=None)))
         else:
             df = pd.read_excel(uploaded_file, skiprows=find_header_row(pd.read_excel(uploaded_file, nrows=30, header=None)))
         
-        # Standardize Columns
         df.columns = [str(c).replace('\n', ' ').strip() for c in df.columns]
         df = df.rename(columns=BLUEPRINT["mapping"])
         
-        # Ensure 'Weight (%)' recovery
+        # Recover Weight column if mapping missed it
         if 'Weight (%)' not in df.columns:
             for col in df.columns:
                 if '%' in col or 'assets' in col.lower():
                     df = df.rename(columns={col: 'Weight (%)'})
                     break
 
-        # NEW STRICTOR FILTERING: Only keep rows where ISIN is present and valid
+        # STRICT ISIN FILTER: Remove anything that isn't a security (Total, SubTotal, Cash)
         if 'ISIN' in df.columns:
-            # Drop rows where ISIN is NaN or empty
             df = df.dropna(subset=['ISIN'])
-            # Remove rows where ISIN is 'nan', 'nil', or doesn't look like an ISIN (usually 12 chars)
             df['ISIN'] = df['ISIN'].astype(str).str.strip()
-            df = df[df['ISIN'].str.len() >= 10] # Standard ISIN is 12, but we allow 10 for safety
+            df = df[df['ISIN'].str.len() >= 10] 
         else:
-            # If no ISIN column found, we fall back to noise filtering, but warn user
-            st.warning(f"No ISIN column detected in {uploaded_file.name}. Noise rows might appear.")
+            st.warning(f"No ISIN column detected in {uploaded_file.name}. Results may be noisy.")
 
-        # Final column selection and type conversion
         cols_to_keep = [c for c in BLUEPRINT["required_cols"] if c in df.columns]
         df = df[cols_to_keep].copy()
         
@@ -72,18 +65,15 @@ def load_and_normalize(uploaded_file):
         return None
 
 def harmonized_fuzzy_match(df_dict):
-    """Uses ISIN as the primary key for matching, falling back to name only if ISIN differs."""
+    """Uses ISIN to ensure 'Vedanta Ltd' and 'Vedanta' are treated as identical."""
     if not df_dict: return {}
     
-    # We can now be much more accurate because we have ISINs
-    # Step 1: Create an ISIN to Name Master Map
     isin_map = {}
     for df in df_dict.values():
         if 'ISIN' in df.columns:
             for _, row in df.iterrows():
                 isin_map[row['ISIN']] = row['Stock Name']
 
-    # Step 2: Apply the master name for each ISIN across all files
     for name in df_dict:
         if 'ISIN' in df_dict[name].columns:
             df_dict[name]['Stock Name'] = df_dict[name]['ISIN'].map(isin_map)
@@ -109,14 +99,13 @@ def main():
         if st.button("Process & Analyze"):
             if files:
                 temp_dict = {f.name: load_and_normalize(f) for f in files if load_and_normalize(f) is not None}
-                # Now using ISIN-based harmonization
                 st.session_state.normalized_dfs = harmonized_fuzzy_match(temp_dict)
                 st.success(f"Portfolios Loaded: {len(st.session_state.normalized_dfs)}")
             else:
                 st.error("Please upload files.")
 
     if not st.session_state.normalized_dfs:
-        st.warning("Please upload files that contain an 'ISIN' column for maximum accuracy.")
+        st.warning("Upload files containing 'ISIN' columns for accurate Stock-only analysis.")
         return
 
     funds = list(st.session_state.normalized_dfs.keys())
@@ -130,43 +119,58 @@ def main():
         if curr_name != prev_name:
             curr_df, prev_df = st.session_state.normalized_dfs[curr_name], st.session_state.normalized_dfs[prev_name]
             
-            # Using ISIN for the most accurate Set logic
-            curr_isins = set(curr_df['ISIN'])
-            prev_isins = set(prev_df['ISIN'])
-            
-            new_isins = curr_isins - prev_isins
-            exit_isins = prev_isins - curr_isins
+            # Metrics
+            curr_isins, prev_isins = set(curr_df['ISIN']), set(prev_df['ISIN'])
+            new_isins, exit_isins = curr_isins - prev_isins, prev_isins - curr_isins
             
             m1, m2, m3 = st.columns(3)
             m1.metric("New Stock Entries", len(new_isins))
-            m2.metric("Common Stocks", len(curr_isins & prev_isins))
+            m2.metric("Retained Stocks", len(curr_isins & prev_isins))
             m3.metric("Complete Exits", len(exit_isins))
 
-            # Tables based on ISIN matches
+            # Restored Sector Drift Chart
+            st.divider()
+            st.subheader("Sectoral Weightage Shifts (MoM)")
+            curr_sec = curr_df.groupby('Sector')['Weight (%)'].sum()
+            prev_sec = prev_df.groupby('Sector')['Weight (%)'].sum()
+            sec_drift = (curr_sec - prev_sec).fillna(0).reset_index()
+            sec_drift.columns = ['Sector', 'Weight Change (%)']
+            
+            fig = px.bar(sec_drift.sort_values('Weight Change (%)'), x='Weight Change (%)', y='Sector', 
+                         orientation='h', color='Weight Change (%)', 
+                         color_continuous_scale='RdYlGn', title="Sectoral Rotation (Bullish vs Bearish)")
+            st.plotly_chart(fig, width="stretch")
+
+            # Summary Tables
             st.divider()
             col_a, col_b, col_c = st.columns(3)
             with col_a:
                 st.write("**🆕 New Entries**")
-                st.dataframe(curr_df[curr_df['ISIN'].isin(new_isins)][['Stock Name', 'Weight (%)', 'ISIN']], hide_index=True)
+                st.dataframe(curr_df[curr_df['ISIN'].isin(new_isins)][['Stock Name', 'Weight (%)', 'Sector']], hide_index=True)
             with col_b:
-                st.write("**✅ Common (By ISIN)**")
+                st.write("**✅ Common (MoM Change)**")
                 drift_df = pd.merge(curr_df, prev_df, on='ISIN', suffixes=('_curr', '_prev'))
                 drift_df['Change'] = drift_df['Weight (%)_curr'] - drift_df['Weight (%)_prev']
-                st.dataframe(drift_df[['Stock Name_curr', 'Weight (%)_curr', 'Change']].rename(columns={'Stock Name_curr':'Stock Name'}), hide_index=True)
+                st.dataframe(drift_df[['Stock Name_curr', 'Weight (%)_curr', 'Change']].rename(columns={'Stock Name_curr':'Stock Name'}).sort_values('Change', ascending=False), hide_index=True)
             with col_c:
                 st.write("**❌ Complete Exits**")
-                st.dataframe(prev_df[prev_df['ISIN'].isin(exit_isins)][['Stock Name', 'Weight (%)', 'ISIN']], hide_index=True)
+                st.dataframe(prev_df[prev_df['ISIN'].isin(exit_isins)][['Stock Name', 'Weight (%)', 'Sector']], hide_index=True)
 
     else:
         st.header("🤝 Cross-AMC Overlap (ISIN Verified)")
-        # Overlap matrix using ISIN instead of names
         if len(funds) > 1:
             matrix = pd.DataFrame(index=funds, columns=funds)
             for f1 in funds:
                 for f2 in funds:
                     s1, s2 = set(st.session_state.normalized_dfs[f1]['ISIN']), set(st.session_state.normalized_dfs[f2]['ISIN'])
                     matrix.loc[f1, f2] = round((len(s1 & s2) / len(s1 | s2)) * 100, 2) if (s1 | s2) else 0
-            st.plotly_chart(px.imshow(matrix.astype(float), text_auto=True, title="Overlap % based on ISIN"), width="stretch")
+            st.plotly_chart(px.imshow(matrix.astype(float), text_auto=True, title="Portfolio Intersection %"), width="stretch")
+            
+        st.subheader("Shared Conviction (Stocks held by >1 AMC)")
+        all_data = pd.concat(st.session_state.normalized_dfs.values())
+        common_agg = all_data.groupby(['Stock Name', 'Sector']).agg({'Weight (%)': 'sum', 'Stock Name': 'count'})
+        common_agg.columns = ['Total Exposure (%)', 'AMC Count']
+        st.dataframe(common_agg[common_agg['AMC Count'] > 1].sort_values('AMC Count', ascending=False), width="stretch")
 
 if __name__ == "__main__":
     main()
