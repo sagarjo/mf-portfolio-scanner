@@ -2,8 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from thefuzz import process, fuzz
-import io
-import re
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="MF Portfolio Pro-Analyzer", layout="wide")
@@ -21,7 +19,6 @@ BLUEPRINT = {
 # --- 2. CORE ENGINE FUNCTIONS ---
 
 def find_header_row(df_preview):
-    """Scans rows to find the table start; converts all to str to avoid float errors."""
     for i, row in df_preview.iterrows():
         row_values = [str(val).lower() if val is not None else "" for val in row.values]
         row_str = " ".join(row_values)
@@ -30,7 +27,6 @@ def find_header_row(df_preview):
     return 0
 
 def load_and_normalize(uploaded_file):
-    """Reads file, finds headers, and maps to Blueprint columns."""
     try:
         if uploaded_file.name.endswith('csv'):
             df = pd.read_csv(uploaded_file, skiprows=find_header_row(pd.read_csv(uploaded_file, nrows=20, header=None)))
@@ -56,7 +52,6 @@ def load_and_normalize(uploaded_file):
         return None
 
 def harmonized_fuzzy_match(df_dict):
-    """Standardizes stock names across all portfolios to ensure analysis accuracy."""
     if not df_dict: return {}
     all_stocks = pd.concat([df['Stock Name'] for df in df_dict.values() if 'Stock Name' in df.columns]).dropna().unique().tolist()
     
@@ -68,7 +63,8 @@ def harmonized_fuzzy_match(df_dict):
             processed.append(stock_str)
         else:
             match, score = process.extractOne(stock_str, processed, scorer=fuzz.token_sort_ratio)
-            if score >= 90: master_map[stock] = match
+            if score >= 85: # Lowered slightly to capture variations like "Ltd" vs "Limited"
+                master_map[stock] = match
             else:
                 master_map[stock] = stock_str
                 processed.append(stock_str)
@@ -84,9 +80,8 @@ def main():
     st.title("📈 Mutual Fund Portfolio Pro-Analyzer")
     
     analysis_goal = st.sidebar.radio(
-        "What is your analysis goal?",
-        ["Time-Series (Same Fund, Different Months)", "Cross-Portfolio (Compare Different AMCs)"],
-        help="Time-Series focuses on MoM changes. Cross-Portfolio focuses on overlaps and shared bets."
+        "Choose Analysis Goal:",
+        ["Time-Series (Same Fund, Different Months)", "Cross-Portfolio (Compare Different AMCs)"]
     )
 
     if 'normalized_dfs' not in st.session_state:
@@ -110,35 +105,70 @@ def main():
     funds = list(st.session_state.normalized_dfs.keys())
 
     if analysis_goal == "Time-Series (Same Fund, Different Months)":
-        st.header("🕒 Month-on-Month Performance & Churn")
+        st.header("🕒 Month-on-Month Portfolio Dynamics")
         c1, c2 = st.columns(2)
         curr_name = c1.selectbox("Select Current Month", funds, index=0)
         prev_name = c2.selectbox("Select Previous Month", funds, index=min(1, len(funds)-1))
 
         if curr_name != prev_name:
-            curr_df, prev_df = st.session_state.normalized_dfs[curr_name], st.session_state.normalized_dfs[prev_name]
+            curr_df = st.session_state.normalized_dfs[curr_name]
+            prev_df = st.session_state.normalized_dfs[prev_name]
             
-            new_in = set(curr_df['Stock Name']) - set(prev_df['Stock Name'])
-            exits = set(prev_df['Stock Name']) - set(curr_df['Stock Name'])
+            # Identify sets
+            curr_stocks = set(curr_df['Stock Name'])
+            prev_stocks = set(prev_df['Stock Name'])
             
-            m1, m2 = st.columns(2)
-            m1.metric("New Stock Entries", len(new_in))
-            m2.metric("Complete Exits", len(exits))
+            new_in = sorted(list(curr_stocks - prev_stocks))
+            exits = sorted(list(prev_stocks - curr_stocks))
+            common = sorted(list(curr_stocks & prev_stocks))
+            
+            # Metrics
+            m1, m2, m3 = st.columns(3)
+            m1.metric("New Entries", len(new_in))
+            m2.metric("Common Holdings", len(common))
+            m3.metric("Complete Exits", len(exits))
 
+            # Sector Drift Chart
             st.subheader("Sectoral Weightage Shifts")
             curr_sec = curr_df.groupby('Sector')['Weight (%)'].sum()
             prev_sec = prev_df.groupby('Sector')['Weight (%)'].sum()
-            sec_drift = (curr_sec - prev_sec).dropna().reset_index()
+            sec_drift = (curr_sec - prev_sec).fillna(0).reset_index()
             sec_drift.columns = ['Sector', 'Weight Change (%)']
             
             fig = px.bar(sec_drift.sort_values('Weight Change (%)'), x='Weight Change (%)', y='Sector', 
-                         orientation='h', color='Weight Change (%)', color_continuous_scale='RdYlGn',
-                         title="Where the AMC Increased/Decreased Bets")
+                         orientation='h', color='Weight Change (%)', color_continuous_scale='RdYlGn')
             st.plotly_chart(fig, width="stretch")
 
+            # --- NEW SUMMARY TABLES ---
+            st.divider()
+            st.subheader("📋 Detailed Portfolio Movement Summary")
+            
+            col_a, col_b, col_c = st.columns(3)
+            
+            with col_a:
+                st.write("**🆕 New Entries**")
+                if new_in:
+                    st.dataframe(curr_df[curr_df['Stock Name'].isin(new_in)][['Stock Name', 'Weight (%)', 'Sector']], hide_index=True)
+                else:
+                    st.write("No new entries.")
+
+            with col_b:
+                st.write("**✅ Retained (Common) Stocks**")
+                # Show common stocks with their change in weight
+                drift_df = pd.merge(curr_df, prev_df, on='Stock Name', suffixes=('_curr', '_prev'))
+                drift_df['Change'] = drift_df['Weight (%)_curr'] - drift_df['Weight (%)_prev']
+                st.dataframe(drift_df[['Stock Name', 'Weight (%)_curr', 'Change']].sort_values('Change', ascending=False), hide_index=True)
+
+            with col_c:
+                st.write("**❌ Complete Exits**")
+                if exits:
+                    st.dataframe(prev_df[prev_df['Stock Name'].isin(exits)][['Stock Name', 'Weight (%)', 'Sector']], hide_index=True)
+                else:
+                    st.write("No exits.")
+
     else:
-        st.header("🤝 Cross-AMC Comparison & Shared Conviction")
-        
+        # Cross-Portfolio logic (Same as before)
+        st.header("🤝 Cross-AMC Comparison")
         if len(funds) > 1:
             matrix = pd.DataFrame(index=funds, columns=funds)
             for f1 in funds:
@@ -149,9 +179,9 @@ def main():
 
         st.subheader("Common Holdings Across Different AMCs")
         all_data = pd.concat(st.session_state.normalized_dfs.values())
-        common = all_data.groupby(['Stock Name', 'Sector']).agg({'Weight (%)': 'sum', 'Stock Name': 'count'})
-        common.columns = ['Total Aggregated Weight (%)', 'Number of AMCs Holding This']
-        st.dataframe(common[common['Number of AMCs Holding This'] > 1].sort_values('Number of AMCs Holding This', ascending=False), width="stretch")
+        common_agg = all_data.groupby(['Stock Name', 'Sector']).agg({'Weight (%)': 'sum', 'Stock Name': 'count'})
+        common_agg.columns = ['Total Weight (%)', 'Fund Count']
+        st.dataframe(common_agg[common_agg['Fund Count'] > 1].sort_values('Fund Count', ascending=False), width="stretch")
 
 if __name__ == "__main__":
     main()
