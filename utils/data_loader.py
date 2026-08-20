@@ -50,6 +50,9 @@ def validate_and_parse_filename(filename: str):
         "display_name": f"{amc} - {scheme} ({month.capitalize()} {year})"
     }
 
+# Backward compatibility alias
+parse_filename_metadata = validate_and_parse_filename
+
 def find_header_row(df_raw: pd.DataFrame) -> int:
     for i, row in df_raw.iterrows():
         row_str = " ".join([str(val).lower() for val in row.values if pd.notna(val)])
