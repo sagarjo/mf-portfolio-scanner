@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 from utils.data_loader import load_and_normalize, validate_and_parse_filename
 from utils.ui_components import inject_custom_styles, render_kpi_card
 
@@ -17,9 +18,11 @@ Upload monthly AMC portfolio disclosures below.
 
 > **Naming Rule:** Files must follow the format:  
 > `AMC-SchemeName-Month-Year.xlsx` or `.csv`  
-> **Example:** `Navi-NiftyNext50-May-2026.xlsx` or `Canara-Robeco-Small-Cap-Fund-July-2026.xlsx`
+> **Examples:** > * `Navi-NiftyNextFifty-May-2026.xlsx`  
+> * `Canara-Robeco-Small-Cap-Fund-July-2026.xlsx`
 """)
 
+# Initialize persistent session state
 if 'portfolio_store' not in st.session_state:
     st.session_state.portfolio_store = {}
 
@@ -30,10 +33,12 @@ uploaded_files = st.file_uploader(
     help="Files must match the convention: AMC-SchemeName-Month-Year"
 )
 
+# Process files only when new files are present
 if uploaded_files:
-    store = {}
+    store = dict(st.session_state.portfolio_store)  # Preserve previously loaded files
     invalid_naming = []
     parsing_failed = []
+    new_loaded = 0
 
     for f in uploaded_files:
         meta = validate_and_parse_filename(f.name)
@@ -44,6 +49,7 @@ if uploaded_files:
         df = load_and_normalize(f)
         if df is not None and not df.empty:
             store[meta['display_name']] = {"data": df, "meta": meta}
+            new_loaded += 1
         else:
             parsing_failed.append(f.name)
 
@@ -54,18 +60,17 @@ if uploaded_files:
             st.error(
                 f"❌ **Invalid file name rejected:** `{inv_f}`\n\n"
                 f"Please ensure the file has the Month and 4-digit Year at the end: `AMC-SchemeName-Month-Year`  \n"
-                f"**Examples:** \n"
-                f"* `Navi-NiftyNext50-May-2026.xlsx`  \n"
-                f"* `Canara-Robeco-Small-Cap-Fund-July-2026.xlsx`"
+                f"**Example:** `Navi-NiftyNextFifty-May-2026.xlsx`"
             )
 
     if parsing_failed:
         for fail_f in parsing_failed:
-            st.warning(f"⚠️ **Could not extract equity data from:** `{fail_f}`. Ensure it contains valid equity rows with `INE...` ISINs.")
+            st.warning(f"⚠️ **Could not extract equity data from:** `{fail_f}`. Ensure it contains valid Indian equity ISINs (`INE...`).")
 
-    if store:
-        st.success(f"✅ Successfully loaded {len(store)} portfolio(s) into memory! Use the left sidebar to navigate to MoM Drift or Cross-AMC pages.")
+    if new_loaded > 0:
+        st.success(f"✅ Loaded {len(store)} portfolio(s) into memory. Use the left sidebar to navigate to MoM Drift or Cross-AMC pages.")
 
+# Render persistent summary table
 if st.session_state.portfolio_store:
     st.divider()
     st.subheader("📂 Loaded Portfolios Overview")
@@ -92,6 +97,10 @@ if st.session_state.portfolio_store:
         for k, v in st.session_state.portfolio_store.items()
     ]
     st.dataframe(pd.DataFrame(summary_records), hide_index=True, use_container_width=True)
+    
+    if st.button("🗑️ Clear All Loaded Portfolios"):
+        st.session_state.portfolio_store = {}
+        st.rerun()
 else:
     if not uploaded_files:
         st.info("💡 **Tip:** Upload your AMC portfolio files above to get started.")
