@@ -50,8 +50,9 @@ def validate_and_parse_filename(filename: str):
         "display_name": f"{amc} - {scheme} ({month.capitalize()} {year})"
     }
 
-# Backward compatibility alias
-parse_filename_metadata = validate_and_parse_filename
+# Explicit definition to prevent any backward-compatibility ImportError
+def parse_filename_metadata(filename: str):
+    return validate_and_parse_filename(filename)
 
 def find_header_row(df_raw: pd.DataFrame) -> int:
     for i, row in df_raw.iterrows():
@@ -63,7 +64,6 @@ def find_header_row(df_raw: pd.DataFrame) -> int:
 def is_valid_equity_isin(isin: str) -> bool:
     if not isin or len(isin) != 12:
         return False
-    # Strictly match INE + 9 alphanumeric characters + 1 check digit
     return bool(re.match(r'^INE[A-Z0-9]{9}[0-9]$', str(isin).strip().upper()))
 
 def load_and_normalize(uploaded_file):
@@ -92,7 +92,6 @@ def load_and_normalize(uploaded_file):
             st.error(f"❌ '{uploaded_file.name}' is missing ISIN or Stock Name headers.")
             return None
 
-        # Filter strictly for Indian Equities
         df['ISIN'] = df['ISIN'].fillna('').astype(str).str.strip().str.upper()
         df = df[df['ISIN'].apply(is_valid_equity_isin)].copy()
 
