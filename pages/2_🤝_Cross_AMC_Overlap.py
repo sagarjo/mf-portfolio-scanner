@@ -9,17 +9,16 @@ inject_custom_styles()
 st.title("🤝 Cross-AMC Overlap & Momentum")
 
 if 'portfolio_store' not in st.session_state or not st.session_state.portfolio_store:
-    st.warning("⚠️ No portfolios loaded yet. Please go to the **Home Page (`app.py`)** and upload portfolio files first.")
+    st.warning("⚠️ No portfolios loaded. Please upload valid files on the **Home Page (`app.py`)** first.")
     st.stop()
 
 portfolios = st.session_state.portfolio_store
 keys = list(portfolios.keys())
 
 if len(keys) < 2:
-    st.info("ℹ️ Please upload at least 2 different AMC portfolios on the Home Page to perform comparison analysis.")
+    st.info("ℹ️ Please upload at least 2 valid portfolios on the Home Page to perform comparison analysis.")
     st.stop()
 
-# Aggregate holdings across all AMCs
 combined_list = []
 for name, pdata in portfolios.items():
     temp = pdata['data'].copy()
@@ -27,7 +26,7 @@ for name, pdata in portfolios.items():
     combined_list.append(temp)
 combined_df = pd.concat(combined_list, ignore_index=True)
 
-# Compute Overlap Matrix
+# Overlap Matrix
 matrix = pd.DataFrame(index=keys, columns=keys)
 for f1 in keys:
     for f2 in keys:
@@ -50,7 +49,7 @@ top_sector = combined_df.groupby('Sector')['Weight (%)'].sum().idxmax()
 st.markdown("### 📊 Cross-Portfolio Summary")
 k1, k2, k3, k4 = st.columns(4)
 with k1:
-    render_kpi_card("Total Portfolios", str(len(keys)), "Files analyzed")
+    render_kpi_card("Total Portfolios", str(len(keys)), "Valid files analyzed")
 with k2:
     render_kpi_card("Unique Equities", str(combined_df['ISIN'].nunique()), "Across all portfolios")
 with k3:
@@ -60,13 +59,13 @@ with k4:
 
 st.divider()
 
-# Overlap Heatmap
+# Heatmap
 st.subheader("🔥 Overlap Heatmap (% Jaccard Overlap)")
 fig_heat = px.imshow(matrix.astype(float), text_auto=True, color_continuous_scale="Blues", title="Holding Intersection Percentage")
 fig_heat.update_layout(height=450)
 st.plotly_chart(fig_heat, use_container_width=True)
 
-# Shared Conviction Table
+# Shared Conviction
 st.divider()
 st.subheader("🌟 Shared Conviction Holdings (Held by 2+ AMCs)")
 shared = conviction[conviction['AMC_Count'] > 1].copy()
