@@ -18,7 +18,7 @@ Upload monthly AMC portfolio disclosures below.
 
 > **Naming Rule:** Files must follow the format:  
 > `AMC-SchemeName-Month-Year.xlsx` or `.csv`  
-> **Examples:** > * `Navi-NiftyNextFifty-May-2026.xlsx` * `Canara-Robeco-Small-Cap-Fund-July-2026.xlsx`
+> **Examples:** `Navi-NiftyNextFifty-May-2026.xlsx` `CanaraRobeco-SmallCapFund-July-2026.xlsx`
 """)
 
 # Initialize persistent session state
