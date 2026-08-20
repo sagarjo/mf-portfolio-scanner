@@ -20,6 +20,11 @@ Upload monthly AMC portfolio disclosures below.
 > **Example:** `Navi-NiftyNext50-May-2026.xlsx`
 """)
 
+# Initialize storage in session state if not present
+if 'portfolio_store' not in st.session_state:
+    st.session_state.portfolio_store = {}
+
+# File Uploader
 uploaded_files = st.file_uploader(
     "Upload Portfolio Files (.xlsx, .csv)",
     accept_multiple_files=True,
@@ -27,36 +32,54 @@ uploaded_files = st.file_uploader(
     help="Files must strictly match the naming convention: AMC-SchemeName-Month-Year (e.g. Navi-NiftyNext50-May-2026.xlsx)"
 )
 
+# Explicit Action Button
 if uploaded_files:
-    if 'portfolio_store' not in st.session_state or st.button("🔄 Process / Refresh Files"):
+    if st.button("🔄 Process / Refresh Files", type="primary", use_container_width=True):
         store = {}
-        invalid_files = []
+        invalid_naming = []
+        parsing_failed = []
 
-        for f in uploaded_files:
-            meta = validate_and_parse_filename(f.name)
-            if not meta:
-                invalid_files.append(f.name)
-                continue
+        with st.spinner("Processing and normalizing portfolio holdings..."):
+            for f in uploaded_files:
+                # Step 1: Validate filename
+                meta = validate_and_parse_filename(f.name)
+                if not meta:
+                    invalid_naming.append(f.name)
+                    continue
 
-            df = load_and_normalize(f)
-            if df is not None and not df.empty:
-                store[meta['display_name']] = {"data": df, "meta": meta}
+                # Step 2: Extract & clean data
+                df = load_and_normalize(f)
+                if df is not None and not df.empty:
+                    store[meta['display_name']] = {"data": df, "meta": meta}
+                else:
+                    parsing_failed.append(f.name)
 
-        # Show invalid file warnings
-        if invalid_files:
-            for inv_f in invalid_files:
+        # Update Session State
+        st.session_state.portfolio_store = store
+
+        # Display Feedback
+        if invalid_naming:
+            for inv_f in invalid_naming:
                 st.error(
                     f"❌ **Invalid file name rejected:** `{inv_f}`\n\n"
-                    f"Please rename the file using the standard format: `AMC-SchemeName-Month-Year`  \n"
+                    f"Please rename the file using the format: `AMC-SchemeName-Month-Year`  \n"
                     f"**Example:** `Navi-NiftyNext50-May-2026.xlsx`"
                 )
 
-        st.session_state.portfolio_store = store
-        
-        if store:
-            st.success(f"✅ Successfully loaded {len(store)} valid portfolio(s). Use the left sidebar to navigate to MoM Drift or Cross-AMC pages.")
+        if parsing_failed:
+            for fail_f in parsing_failed:
+                st.warning(
+                    f"⚠️ **Could not extract equity data from:** `{fail_f}`\n\n"
+                    f"Check that the sheet contains valid column headers (`ISIN`, `Weight (%)` / `% of Net Assets`, `Stock Name`) "
+                    f"and valid equity ISINs starting with `INE`."
+                )
 
-if 'portfolio_store' in st.session_state and st.session_state.portfolio_store:
+        if store:
+            st.success(f"✅ Successfully loaded {len(store)} valid portfolio(s)!")
+            st.rerun()
+
+# Render Overview if portfolios are present
+if st.session_state.portfolio_store:
     st.divider()
     st.subheader("📂 Loaded Portfolios Overview")
     
@@ -83,4 +106,7 @@ if 'portfolio_store' in st.session_state and st.session_state.portfolio_store:
     ]
     st.dataframe(summary_records, hide_index=True, use_container_width=True)
 else:
-    st.info("💡 **Tip:** Upload files meeting the naming requirement above to start.")
+    if uploaded_files:
+        st.info("👆 Click the **'🔄 Process / Refresh Files'** button above to parse your uploaded files.")
+    else:
+        st.info("💡 **Tip:** Upload files meeting the naming requirement above to start.")
