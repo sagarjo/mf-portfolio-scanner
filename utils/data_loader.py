@@ -27,55 +27,67 @@ VALID_MONTHS = {
 }
 
 def validate_and_parse_filename(filename: str):
-    clean_name = filename
-    clean_name = re.sub(r'\.(xlsx|xls|csv)(\s*-\s*[A-Za-z0-9_]+)?\.(csv|xlsx|xls)$', '', clean_name, flags=re.IGNORECASE)
-    clean_name = re.sub(r'\.(xlsx|xls|csv)$', '', clean_name, flags=re.IGNORECASE)
-    clean_name = re.sub(r'\s*-\s*(Sheet\d+|SC|JBFLEXI)$', '', clean_name, flags=re.IGNORECASE)
+    """
+    Validates and parses filename format: AMC-SchemeName-Month-Year
+    Guarantees returning ALL keys: 'amc', 'scheme', 'month', 'year', 'period', 'display_name'
+    Returns None only if validation strictly fails.
+    """
+    try:
+        # Strip trailing extension variants and export sheet names
+        clean_name = filename
+        clean_name = re.sub(r'\.(xlsx|xls|csv)(\s*-\s*[A-Za-z0-9_]+)?\.(csv|xlsx|xls)$', '', clean_name, flags=re.IGNORECASE)
+        clean_name = re.sub(r'\.(xlsx|xls|csv)$', '', clean_name, flags=re.IGNORECASE)
+        clean_name = re.sub(r'\s*-\s*(Sheet\d+|SC|JBFLEXI).*$', '', clean_name, flags=re.IGNORECASE)
 
-    clean_name = clean_name.replace('–', '-').replace('—', '-').replace('_', '-')
-    clean_name = re.sub(r'\s*-\s*', '-', clean_name).strip('-')
+        # Standardize dashes and underscores
+        clean_name = clean_name.replace('–', '-').replace('—', '-').replace('_', '-')
+        clean_name = re.sub(r'\s*-\s*', '-', clean_name).strip('-')
 
-    tokens = [t.strip() for t in clean_name.split('-') if t.strip()]
-    if len(tokens) < 3:
-        return None
+        tokens = [t.strip() for t in clean_name.split('-') if t.strip()]
+        if len(tokens) < 3:
+            return None
 
-    amc = tokens[0]
-    year = None
-    month = None
-    year_idx = None
-    month_idx = None
+        amc = tokens[0]
+        year = None
+        month = None
+        year_idx = None
+        month_idx = None
 
-    for idx in range(len(tokens) - 1, 0, -1):
-        if re.match(r'^\d{4}$', tokens[idx]):
-            year = tokens[idx]
-            year_idx = idx
-            break
-
-    if year_idx is not None:
-        for idx in range(year_idx - 1, 0, -1):
-            cleaned_m = tokens[idx].lower()
-            if cleaned_m in VALID_MONTHS:
-                month = VALID_MONTHS[cleaned_m]
-                month_idx = idx
+        # Look for 4-digit Year from right to left
+        for idx in range(len(tokens) - 1, 0, -1):
+            if re.match(r'^\d{4}$', tokens[idx]):
+                year = tokens[idx]
+                year_idx = idx
                 break
 
-    if not year or not month or month_idx is None:
+        # Look for Month before Year
+        if year_idx is not None:
+            for idx in range(year_idx - 1, 0, -1):
+                cleaned_m = tokens[idx].lower()
+                if cleaned_m in VALID_MONTHS:
+                    month = VALID_MONTHS[cleaned_m]
+                    month_idx = idx
+                    break
+
+        if not year or not month or month_idx is None:
+            return None
+
+        scheme_tokens = tokens[1:month_idx]
+        if not scheme_tokens:
+            scheme = "Default Scheme"
+        else:
+            scheme = " ".join(scheme_tokens)
+
+        return {
+            "amc": str(amc),
+            "scheme": str(scheme),
+            "month": str(month),
+            "year": str(year),
+            "period": f"{month} {year}",
+            "display_name": f"{amc} - {scheme} ({month} {year})"
+        }
+    except Exception:
         return None
-
-    scheme_tokens = tokens[1:month_idx]
-    if not scheme_tokens:
-        return None
-
-    scheme = " ".join(scheme_tokens)
-
-    return {
-        "amc": amc,
-        "scheme": scheme,
-        "month": month,
-        "year": year,
-        "period": f"{month} {year}",
-        "display_name": f"{amc} - {scheme} ({month} {year})"
-    }
 
 parse_filename_metadata = validate_and_parse_filename
 
@@ -92,7 +104,6 @@ def is_valid_equity_isin(isin: str) -> bool:
     return bool(re.match(r'^INE[A-Z0-9]{9}[0-9]$', str(isin).strip().upper()))
 
 def read_df_with_fallback(file_bytes, is_csv=True):
-    """Reads dataframe with automatic encoding fallback."""
     if not is_csv:
         preview = pd.read_excel(io.BytesIO(file_bytes), nrows=40, header=None)
         h_idx = find_header_row(preview)
@@ -117,10 +128,10 @@ def load_and_normalize(uploaded_file):
         df = read_df_with_fallback(file_bytes, is_csv=is_csv)
 
         if df is None:
-            st.error(f"❌ '{uploaded_file.name}': Unable to decode file.")
+            st.error(f"❌ '{uploaded_file.name}': Unable to decode file format.")
             return None
 
-        # Clean headers
+        # Standardize column headers
         df.columns = [str(c).replace('\n', ' ').strip() for c in df.columns]
         df = df.rename(columns=BLUEPRINT["mapping"])
 
@@ -135,6 +146,7 @@ def load_and_normalize(uploaded_file):
             st.error(f"❌ '{uploaded_file.name}': Missing 'ISIN' or 'Stock Name' columns.")
             return None
 
+        # Filter strictly for Indian Equities (INE...)
         df['ISIN'] = df['ISIN'].fillna('').astype(str).str.strip().str.upper()
         df = df[df['ISIN'].apply(is_valid_equity_isin)].copy()
 
