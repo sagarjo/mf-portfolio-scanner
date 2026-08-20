@@ -35,11 +35,11 @@ for f1 in keys:
         overlap = (len(s1 & s2) / len(s1 | s2)) * 100 if (s1 | s2) else 0.0
         matrix.loc[f1, f2] = round(overlap, 1)
 
-conviction = combined_df.groupby(['ISIN', 'Stock Name', 'Sector']).agg(
+conviction = combined_df.groupby(['ISIN', 'Stock Name', 'Sector'], as_index=False).agg(
     AMC_Count=('Portfolio', 'nunique'),
     Avg_Weight=('Weight (%)', 'mean'),
     Total_Weight=('Weight (%)', 'sum')
-).reset_index().sort_values(by=['AMC_Count', 'Total_Weight'], ascending=[False, False])
+).sort_values(by=['AMC_Count', 'Total_Weight'], ascending=[False, False]).reset_index(drop=True)
 
 top_stock = conviction.iloc[0]['Stock Name'] if not conviction.empty else "N/A"
 top_stock_count = conviction.iloc[0]['AMC_Count'] if not conviction.empty else 0
@@ -53,15 +53,20 @@ with k1:
 with k2:
     render_kpi_card("Unique Equities", str(combined_df['ISIN'].nunique()), "Across all portfolios")
 with k3:
-    render_kpi_card("Top Conviction Stock", top_stock, f"In {top_stock_count} portfolios")
+    render_kpi_card("Top Conviction Stock", str(top_stock), f"In {top_stock_count} portfolios")
 with k4:
-    render_kpi_card("Dominant Sector", top_sector, "Highest aggregate weight")
+    render_kpi_card("Dominant Sector", str(top_sector), "Highest aggregate weight")
 
 st.divider()
 
 # Heatmap
 st.subheader("🔥 Overlap Heatmap (% Jaccard Overlap)")
-fig_heat = px.imshow(matrix.astype(float), text_auto=True, color_continuous_scale="Blues", title="Holding Intersection Percentage")
+fig_heat = px.imshow(
+    matrix.astype(float),
+    text_auto=True,
+    color_continuous_scale="Blues",
+    title="Holding Intersection Percentage"
+)
 fig_heat.update_layout(height=450)
 st.plotly_chart(fig_heat, use_container_width=True)
 
@@ -69,11 +74,10 @@ st.plotly_chart(fig_heat, use_container_width=True)
 st.divider()
 st.subheader("🌟 Shared Conviction Holdings (Held by 2+ AMCs)")
 shared = conviction[conviction['AMC_Count'] > 1].copy()
-shared['Avg_Weight'] = shared['Avg_Weight'].round(2)
-shared['Total_Weight'] = shared['Total_Weight'].round(2)
-
-st.dataframe(
-    shared[['Stock Name', 'Sector', 'AMC_Count', 'Avg_Weight', 'Total_Weight']],
-    hide_index=True,
-    use_container_width=True
-)
+if not shared.empty:
+    shared['Avg_Weight'] = shared['Avg_Weight'].round(2)
+    shared['Total_Weight'] = shared['Total_Weight'].round(2)
+    display_df = shared[['Stock Name', 'Sector', 'AMC_Count', 'Avg_Weight', 'Total_Weight']].reset_index(drop=True)
+    st.dataframe(pd.DataFrame(display_df), hide_index=True, use_container_width=True)
+else:
+    st.info("No overlapping stocks found across the uploaded portfolios.")
