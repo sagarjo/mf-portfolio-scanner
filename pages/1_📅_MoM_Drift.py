@@ -66,32 +66,42 @@ fig.update_layout(height=400, margin=dict(l=20, r=20, t=40, b=20))
 st.plotly_chart(fig, use_container_width=True)
 
 # Holding Tables
-st.subheader("📋 Holding Details")
-t_new, t_common, t_exit = st.tabs(["🆕 New Entries", "⚖️ Common Holdings (Weight Drift)", "❌ Complete Exits"])
+st.subheader("📋 Holding Details (Weights, Market Value & Quantity)")
+t_new, t_common, t_exit = st.tabs(["🆕 New Entries", "⚖️ Common Holdings (Weight & Qty Drift)", "❌ Complete Exits"])
 
 with t_new:
     if new_isins:
-        new_df = curr_df[curr_df['ISIN'].isin(new_isins)][['Stock Name', 'Sector', 'Weight (%)']].copy()
-        new_df = new_df.sort_values(by='Weight (%)', ascending=False).reset_index(drop=True)
+        new_df = curr_df[curr_df['ISIN'].isin(new_isins)][
+            ['Stock Name', 'Sector', 'Weight (%)', 'Market Value (Lakhs)', 'Quantity']
+        ].copy().sort_values(by='Weight (%)', ascending=False).reset_index(drop=True)
         st.dataframe(pd.DataFrame(new_df), hide_index=True, use_container_width=True)
     else:
         st.info("No new stock entries added this month.")
 
 with t_common:
     merged = pd.merge(
-        curr_df[['ISIN', 'Stock Name', 'Sector', 'Weight (%)']],
-        prev_df[['ISIN', 'Weight (%)']],
+        curr_df[['ISIN', 'Stock Name', 'Sector', 'Weight (%)', 'Market Value (Lakhs)', 'Quantity']],
+        prev_df[['ISIN', 'Weight (%)', 'Market Value (Lakhs)', 'Quantity']],
         on='ISIN',
         suffixes=('_Current', '_Previous')
     )
-    merged['Delta (%)'] = (merged['Weight (%)_Current'] - merged['Weight (%)_Previous']).round(2)
-    merged_display = merged[['Stock Name', 'Sector', 'Weight (%)_Current', 'Weight (%)_Previous', 'Delta (%)']].sort_values('Delta (%)', ascending=False).reset_index(drop=True)
+    merged['Weight Delta (%)'] = (merged['Weight (%)_Current'] - merged['Weight (%)_Previous']).round(2)
+    merged['Qty Delta'] = merged['Quantity_Current'] - merged['Quantity_Previous']
+    
+    display_cols = [
+        'Stock Name', 'Sector',
+        'Weight (%)_Current', 'Weight (%)_Previous', 'Weight Delta (%)',
+        'Quantity_Current', 'Quantity_Previous', 'Qty Delta',
+        'Market Value (Lakhs)_Current'
+    ]
+    merged_display = merged[display_cols].sort_values(by='Weight Delta (%)', ascending=False).reset_index(drop=True)
     st.dataframe(pd.DataFrame(merged_display), hide_index=True, use_container_width=True)
 
 with t_exit:
     if exit_isins:
-        exit_df = prev_df[prev_df['ISIN'].isin(exit_isins)][['Stock Name', 'Sector', 'Weight (%)']].copy()
-        exit_df = exit_df.sort_values(by='Weight (%)', ascending=False).reset_index(drop=True)
+        exit_df = prev_df[prev_df['ISIN'].isin(exit_isins)][
+            ['Stock Name', 'Sector', 'Weight (%)', 'Market Value (Lakhs)', 'Quantity']
+        ].copy().sort_values(by='Weight (%)', ascending=False).reset_index(drop=True)
         st.dataframe(pd.DataFrame(exit_df), hide_index=True, use_container_width=True)
     else:
         st.info("No complete stock exits recorded this month.")
