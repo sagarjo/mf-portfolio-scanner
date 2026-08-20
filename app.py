@@ -19,7 +19,7 @@ Upload monthly AMC portfolio disclosures below.
 > **Naming Rule:** Files must follow the format:  
 > `AMC-SchemeName-Month-Year.xlsx` or `.csv`  
 > **Examples:** > * `Navi-NiftyNextFifty-May-2026.xlsx`  
-> * `CanaraRobeco-SmallCapFund-July-2026.xlsx`
+> * `Canara-Robeco-Small-Cap-Fund-July-2026.xlsx`
 """)
 
 # Initialize persistent session state
@@ -33,27 +33,25 @@ uploaded_files = st.file_uploader(
     help="Files must match the convention: AMC-SchemeName-Month-Year"
 )
 
-# Process files only when new files are present
 if uploaded_files:
-    store = dict(st.session_state.portfolio_store)  # Preserve previously loaded files
+    store = {}
     invalid_naming = []
     parsing_failed = []
-    new_loaded = 0
 
     for f in uploaded_files:
         meta = validate_and_parse_filename(f.name)
-        if not meta:
+        if not meta or 'display_name' not in meta:
             invalid_naming.append(f.name)
             continue
 
         df = load_and_normalize(f)
         if df is not None and not df.empty:
             store[meta['display_name']] = {"data": df, "meta": meta}
-            new_loaded += 1
         else:
             parsing_failed.append(f.name)
 
-    st.session_state.portfolio_store = store
+    if store:
+        st.session_state.portfolio_store = store
 
     if invalid_naming:
         for inv_f in invalid_naming:
@@ -67,17 +65,17 @@ if uploaded_files:
         for fail_f in parsing_failed:
             st.warning(f"⚠️ **Could not extract equity data from:** `{fail_f}`. Ensure it contains valid Indian equity ISINs (`INE...`).")
 
-    if new_loaded > 0:
+    if store:
         st.success(f"✅ Loaded {len(store)} portfolio(s) into memory. Use the left sidebar to navigate to MoM Drift or Cross-AMC pages.")
 
-# Render persistent summary table
+# Render Overview if portfolios are present
 if st.session_state.portfolio_store:
     st.divider()
     st.subheader("📂 Loaded Portfolios Overview")
 
     col1, col2, col3 = st.columns(3)
     total_files = len(st.session_state.portfolio_store)
-    total_equities = sum(len(v['data']) for v in st.session_state.portfolio_store.values())
+    total_equities = sum(len(v.get('data', [])) for v in st.session_state.portfolio_store.values())
 
     with col1:
         render_kpi_card("Active Portfolios", str(total_files), "Loaded in memory")
@@ -86,18 +84,20 @@ if st.session_state.portfolio_store:
     with col3:
         render_kpi_card("System Status", "Ready", "Proceed to analysis pages")
 
-    summary_records = [
-        {
+    summary_records = []
+    for k, v in st.session_state.portfolio_store.items():
+        meta = v.get('meta', {})
+        df_len = len(v.get('data', []))
+        summary_records.append({
             "Display Name": k,
-            "AMC": v['meta']['amc'],
-            "Scheme Name": v['meta']['scheme'],
-            "Period": v['meta']['period'],
-            "Total Stocks": len(v['data'])
-        }
-        for k, v in st.session_state.portfolio_store.items()
-    ]
+            "AMC": meta.get('amc', 'N/A'),
+            "Scheme Name": meta.get('scheme', 'N/A'),
+            "Period": meta.get('period', 'N/A'),
+            "Total Stocks": df_len
+        })
+
     st.dataframe(pd.DataFrame(summary_records), hide_index=True, use_container_width=True)
-    
+
     if st.button("🗑️ Clear All Loaded Portfolios"):
         st.session_state.portfolio_store = {}
         st.rerun()
