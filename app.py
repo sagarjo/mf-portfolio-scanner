@@ -17,9 +17,8 @@ st.markdown("""
 Upload monthly AMC portfolio disclosures below.
 
 > **Naming Rule:** Files must follow the format:  
-> `AMC-SchemeName-Month-Year.xlsx` or `.csv`  
-> **Examples:** `Navi-NiftyNextFifty-May-2026.xlsx`
-`CanaraRobeco-SmallCapFund-July-2026.xlsx`
+> `AMC_SchemeName_Month_Year_Other.xlsx` or `.csv`  
+> **Example:** `Navi_NiftyNext50_June_2026_abc.xlsx`
 """)
 
 if 'portfolio_store' not in st.session_state:
@@ -29,7 +28,7 @@ uploaded_files = st.file_uploader(
     "Upload Portfolio Files (.xlsx, .csv)",
     accept_multiple_files=True,
     type=['csv', 'xlsx'],
-    help="Files must match the convention: AMC-SchemeName-Month-Year"
+    help="Files must match the convention: AMC_SchemeName_Month_Year_Other"
 )
 
 if uploaded_files:
@@ -57,8 +56,8 @@ if uploaded_files:
         for inv_f in invalid_naming:
             st.error(
                 f"❌ **Invalid file name rejected:** `{inv_f}`\n\n"
-                f"Please ensure the file has the Month and 4-digit Year at the end: `AMC-SchemeName-Month-Year`  \n"
-                f"**Example:** `Navi-NiftyNextFifty-May-2026.xlsx`"
+                f"Please rename the file to match: `AMC_SchemeName_Month_Year_Other`  \n"
+                f"**Example:** `Navi_NiftyNext50_June_2026_abc.xlsx`"
             )
 
     if parsing_failed:
@@ -95,6 +94,7 @@ if st.session_state.portfolio_store:
             "AMC": meta.get('amc', 'N/A'),
             "Scheme Name": meta.get('scheme', 'N/A'),
             "Period": meta.get('period', 'N/A'),
+            "Other Tag": meta.get('other', 'N/A'),
             "Total Stocks": len(df),
             "Total Equity Value (₹ Lakhs)": f"{mval_lakhs:,.2f}" if mval_lakhs > 0 else "Not Disclosed"
         })
