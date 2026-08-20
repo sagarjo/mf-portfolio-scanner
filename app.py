@@ -18,10 +18,10 @@ Upload monthly AMC portfolio disclosures below.
 
 > **Naming Rule:** Files must follow the format:  
 > `AMC-SchemeName-Month-Year.xlsx` or `.csv`  
-> **Examples:** `Navi-NiftyNextFifty-May-2026.xlsx` `CanaraRobeco-SmallCapFund-July-2026.xlsx`
+> **Examples:** > * `Navi-NiftyNextFifty-May-2026.xlsx`  
+> * `CanaraRobeco-SmallCapFund-July-2026.xlsx`
 """)
 
-# Initialize persistent session state
 if 'portfolio_store' not in st.session_state:
     st.session_state.portfolio_store = {}
 
@@ -33,9 +33,10 @@ uploaded_files = st.file_uploader(
 )
 
 if uploaded_files:
-    store = {}
+    store = dict(st.session_state.portfolio_store)
     invalid_naming = []
     parsing_failed = []
+    new_loaded = 0
 
     for f in uploaded_files:
         meta = validate_and_parse_filename(f.name)
@@ -46,11 +47,11 @@ if uploaded_files:
         df = load_and_normalize(f)
         if df is not None and not df.empty:
             store[meta['display_name']] = {"data": df, "meta": meta}
+            new_loaded += 1
         else:
             parsing_failed.append(f.name)
 
-    if store:
-        st.session_state.portfolio_store = store
+    st.session_state.portfolio_store = store
 
     if invalid_naming:
         for inv_f in invalid_naming:
@@ -64,10 +65,9 @@ if uploaded_files:
         for fail_f in parsing_failed:
             st.warning(f"⚠️ **Could not extract equity data from:** `{fail_f}`. Ensure it contains valid Indian equity ISINs (`INE...`).")
 
-    if store:
+    if new_loaded > 0:
         st.success(f"✅ Loaded {len(store)} portfolio(s) into memory. Use the left sidebar to navigate to MoM Drift or Cross-AMC pages.")
 
-# Render Overview if portfolios are present
 if st.session_state.portfolio_store:
     st.divider()
     st.subheader("📂 Loaded Portfolios Overview")
@@ -75,24 +75,28 @@ if st.session_state.portfolio_store:
     col1, col2, col3 = st.columns(3)
     total_files = len(st.session_state.portfolio_store)
     total_equities = sum(len(v.get('data', [])) for v in st.session_state.portfolio_store.values())
+    total_mval_cr = sum(v.get('data', pd.DataFrame())['Market Value (Lakhs)'].sum() for v in st.session_state.portfolio_store.values()) / 100.0
 
     with col1:
         render_kpi_card("Active Portfolios", str(total_files), "Loaded in memory")
     with col2:
         render_kpi_card("Total Equities Captured", str(total_equities), "Validated INE stocks")
     with col3:
-        render_kpi_card("System Status", "Ready", "Proceed to analysis pages")
+        render_kpi_card("Total Equity AUM", f"₹{total_mval_cr:,.2f} Cr" if total_mval_cr > 0 else "N/A", "Across active portfolios")
 
     summary_records = []
     for k, v in st.session_state.portfolio_store.items():
         meta = v.get('meta', {})
-        df_len = len(v.get('data', []))
+        df = v.get('data', pd.DataFrame())
+        mval_lakhs = df['Market Value (Lakhs)'].sum() if 'Market Value (Lakhs)' in df.columns else 0.0
+        
         summary_records.append({
             "Display Name": k,
             "AMC": meta.get('amc', 'N/A'),
             "Scheme Name": meta.get('scheme', 'N/A'),
             "Period": meta.get('period', 'N/A'),
-            "Total Stocks": df_len
+            "Total Stocks": len(df),
+            "Total Equity Value (₹ Lakhs)": f"{mval_lakhs:,.2f}" if mval_lakhs > 0 else "Not Disclosed"
         })
 
     st.dataframe(pd.DataFrame(summary_records), hide_index=True, use_container_width=True)
