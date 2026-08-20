@@ -9,15 +9,15 @@ inject_custom_styles()
 st.title("📅 Month-on-Month Portfolio Drift")
 
 if 'portfolio_store' not in st.session_state or not st.session_state.portfolio_store:
-    st.warning("⚠️ No portfolios loaded yet. Please go to the **Home Page (`app.py`)** and upload portfolio files first.")
+    st.warning("⚠️ No portfolios loaded. Please upload valid files on the **Home Page (`app.py`)** first.")
     st.stop()
 
 portfolios = st.session_state.portfolio_store
 keys = list(portfolios.keys())
 
 c1, c2 = st.columns(2)
-curr_key = c1.selectbox("📌 Current / Later Month", keys, index=0, help="Select the latest month's portfolio disclosure.")
-prev_key = c2.selectbox("⏪ Previous / Baseline Month", keys, index=min(1, len(keys)-1), help="Select the baseline or preceding month's portfolio disclosure.")
+curr_key = c1.selectbox("📌 Current / Later Month", keys, index=0, help="Select the latest month disclosure.")
+prev_key = c2.selectbox("⏪ Previous / Baseline Month", keys, index=min(1, len(keys)-1), help="Select the baseline comparison month disclosure.")
 
 if curr_key == prev_key:
     st.warning("Please choose two different portfolio periods to compute MoM differences.")
@@ -31,7 +31,6 @@ prev_isins = set(prev_df['ISIN'])
 
 new_isins = curr_isins - prev_isins
 exit_isins = prev_isins - curr_isins
-retained_isins = curr_isins & prev_isins
 
 hero_row = curr_df.sort_values(by="Weight (%)", ascending=False).iloc[0] if not curr_df.empty else None
 hero_stock_label = f"{hero_row['Stock Name']} ({hero_row['Weight (%)']:.2f}%)" if hero_row is not None else "N/A"
