@@ -38,7 +38,9 @@ for f1 in keys:
 conviction = combined_df.groupby(['ISIN', 'Stock Name', 'Sector'], as_index=False).agg(
     AMC_Count=('Portfolio', 'nunique'),
     Avg_Weight=('Weight (%)', 'mean'),
-    Total_Weight=('Weight (%)', 'sum')
+    Total_Weight=('Weight (%)', 'sum'),
+    Total_Market_Value_Lakhs=('Market Value (Lakhs)', 'sum'),
+    Total_Quantity=('Quantity', 'sum')
 ).sort_values(by=['AMC_Count', 'Total_Weight'], ascending=[False, False]).reset_index(drop=True)
 
 top_stock = conviction.iloc[0]['Stock Name'] if not conviction.empty else "N/A"
@@ -77,7 +79,13 @@ shared = conviction[conviction['AMC_Count'] > 1].copy()
 if not shared.empty:
     shared['Avg_Weight'] = shared['Avg_Weight'].round(2)
     shared['Total_Weight'] = shared['Total_Weight'].round(2)
-    display_df = shared[['Stock Name', 'Sector', 'AMC_Count', 'Avg_Weight', 'Total_Weight']].reset_index(drop=True)
+    shared['Total_Market_Value_Lakhs'] = shared['Total_Market_Value_Lakhs'].round(2)
+    
+    display_df = shared[[
+        'Stock Name', 'Sector', 'AMC_Count',
+        'Avg_Weight', 'Total_Weight',
+        'Total_Market_Value_Lakhs', 'Total_Quantity'
+    ]].reset_index(drop=True)
     st.dataframe(pd.DataFrame(display_df), hide_index=True, use_container_width=True)
 else:
     st.info("No overlapping stocks found across the uploaded portfolios.")
