@@ -6,14 +6,28 @@ import streamlit as st
 BLUEPRINT = {
     "required_cols": ['Stock Name', 'Weight (%)', 'Sector', 'ISIN'],
     "mapping": {
+        # Stock Name
         'Name of the Instrument': 'Stock Name', 'Company Name': 'Stock Name',
         'Issuer': 'Stock Name', 'Security': 'Stock Name', 'Instrument Name': 'Stock Name',
         'Name of Instrument': 'Stock Name', 'Security Name': 'Stock Name',
+        # Sector
         'Industry Classification': 'Sector', 'Industry/Rating': 'Sector', 'Industry': 'Sector',
+        # Weight
         '% to Net Assets': 'Weight (%)', 'Weightage': 'Weight (%)', '% of Total AUM': 'Weight (%)',
         '% to NAV': 'Weight (%)', '% of Net Assets': 'Weight (%)', '% to AUM': 'Weight (%)',
         'Market value / Net Assets (%)': 'Weight (%)', '% to Total Net Assets': 'Weight (%)',
-        'ISIN Code': 'ISIN', 'ISIN': 'ISIN', 'Isin': 'ISIN', 'Security ISIN': 'ISIN'
+        # ISIN
+        'ISIN Code': 'ISIN', 'ISIN': 'ISIN', 'Isin': 'ISIN', 'Security ISIN': 'ISIN',
+        # Quantity
+        'Quantity': 'Quantity', 'Qty': 'Quantity', 'No. of Shares': 'Quantity', 'Shares': 'Quantity',
+        # Market Value
+        'Market/Fair Value(Rs. in Lakhs)': 'Market Value (Lakhs)',
+        'Market value(Rs. in Lakhs)': 'Market Value (Lakhs)',
+        'Market Value (Rs. in Lakhs)': 'Market Value (Lakhs)',
+        'Market/Fair Value (Rs. in Lakhs)': 'Market Value (Lakhs)',
+        'Market Value (Rs. in Lakh)': 'Market Value (Lakhs)',
+        'Market Value (Lakhs)': 'Market Value (Lakhs)',
+        'Market/Fair Value': 'Market Value (Lakhs)'
     }
 }
 
@@ -29,17 +43,13 @@ VALID_MONTHS = {
 def validate_and_parse_filename(filename: str):
     """
     Validates and parses filename format: AMC-SchemeName-Month-Year
-    Guarantees returning ALL keys: 'amc', 'scheme', 'month', 'year', 'period', 'display_name'
-    Returns None only if validation strictly fails.
     """
     try:
-        # Strip trailing extension variants and export sheet names
         clean_name = filename
         clean_name = re.sub(r'\.(xlsx|xls|csv)(\s*-\s*[A-Za-z0-9_]+)?\.(csv|xlsx|xls)$', '', clean_name, flags=re.IGNORECASE)
         clean_name = re.sub(r'\.(xlsx|xls|csv)$', '', clean_name, flags=re.IGNORECASE)
         clean_name = re.sub(r'\s*-\s*(Sheet\d+|SC|JBFLEXI).*$', '', clean_name, flags=re.IGNORECASE)
 
-        # Standardize dashes and underscores
         clean_name = clean_name.replace('–', '-').replace('—', '-').replace('_', '-')
         clean_name = re.sub(r'\s*-\s*', '-', clean_name).strip('-')
 
@@ -48,19 +58,14 @@ def validate_and_parse_filename(filename: str):
             return None
 
         amc = tokens[0]
-        year = None
-        month = None
-        year_idx = None
-        month_idx = None
+        year, month, year_idx, month_idx = None, None, None, None
 
-        # Look for 4-digit Year from right to left
         for idx in range(len(tokens) - 1, 0, -1):
             if re.match(r'^\d{4}$', tokens[idx]):
                 year = tokens[idx]
                 year_idx = idx
                 break
 
-        # Look for Month before Year
         if year_idx is not None:
             for idx in range(year_idx - 1, 0, -1):
                 cleaned_m = tokens[idx].lower()
@@ -73,10 +78,7 @@ def validate_and_parse_filename(filename: str):
             return None
 
         scheme_tokens = tokens[1:month_idx]
-        if not scheme_tokens:
-            scheme = "Default Scheme"
-        else:
-            scheme = " ".join(scheme_tokens)
+        scheme = " ".join(scheme_tokens) if scheme_tokens else "Default Scheme"
 
         return {
             "amc": str(amc),
@@ -131,10 +133,11 @@ def load_and_normalize(uploaded_file):
             st.error(f"❌ '{uploaded_file.name}': Unable to decode file format.")
             return None
 
-        # Standardize column headers
+        # Clean column headers
         df.columns = [str(c).replace('\n', ' ').strip() for c in df.columns]
         df = df.rename(columns=BLUEPRINT["mapping"])
 
+        # Fallback for Weight column
         if 'Weight (%)' not in df.columns:
             for col in df.columns:
                 c_low = col.lower()
@@ -154,17 +157,43 @@ def load_and_normalize(uploaded_file):
             st.error(f"❌ '{uploaded_file.name}': No valid equity ISINs (`INE...`) found.")
             return None
 
+        df['Stock Name'] = df['Stock Name'].astype(str).str.strip()
         df['Sector'] = df['Sector'].fillna('Unclassified').astype(str).str.strip() if 'Sector' in df.columns else 'Unclassified'
+
+        # Clean numerical weights
         df['Weight (%)'] = pd.to_numeric(
             df['Weight (%)'].astype(str).str.replace(r'[^0-9.]', '', regex=True),
             errors='coerce'
         ).fillna(0.0)
 
-        df['Stock Name'] = df['Stock Name'].astype(str).str.strip()
-        cols_to_keep = ['Stock Name', 'Weight (%)', 'Sector', 'ISIN']
+        # Clean Market Value (Lakhs) if present
+        if 'Market Value (Lakhs)' in df.columns:
+            df['Market Value (Lakhs)'] = pd.to_numeric(
+                df['Market Value (Lakhs)'].astype(str).str.replace(r'[^0-9.]', '', regex=True),
+                errors='coerce'
+            ).fillna(0.0)
+        else:
+            df['Market Value (Lakhs)'] = 0.0
+
+        # Clean Quantity if present
+        if 'Quantity' in df.columns:
+            df['Quantity'] = pd.to_numeric(
+                df['Quantity'].astype(str).str.replace(r'[^0-9]', '', regex=True),
+                errors='coerce'
+            ).fillna(0).astype(int)
+        else:
+            df['Quantity'] = 0
+
+        cols_to_keep = ['ISIN', 'Stock Name', 'Sector', 'Weight (%)', 'Market Value (Lakhs)', 'Quantity']
         df = df[cols_to_keep].dropna(subset=['Stock Name']).reset_index(drop=True)
 
-        return df.groupby(['ISIN', 'Stock Name', 'Sector'], as_index=False)['Weight (%)'].sum()
+        # Aggregate duplicate / split entries for the same ISIN
+        agg_map = {
+            'Weight (%)': 'sum',
+            'Market Value (Lakhs)': 'sum',
+            'Quantity': 'sum'
+        }
+        return df.groupby(['ISIN', 'Stock Name', 'Sector'], as_index=False).agg(agg_map)
     except Exception as e:
         st.error(f"Error parsing {uploaded_file.name}: {e}")
         return None
