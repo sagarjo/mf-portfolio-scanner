@@ -6,21 +6,15 @@ import streamlit as st
 BLUEPRINT = {
     "required_cols": ['Stock Name', 'Weight (%)', 'Sector', 'ISIN'],
     "mapping": {
-        # Stock Name
         'Name of the Instrument': 'Stock Name', 'Company Name': 'Stock Name',
         'Issuer': 'Stock Name', 'Security': 'Stock Name', 'Instrument Name': 'Stock Name',
         'Name of Instrument': 'Stock Name', 'Security Name': 'Stock Name',
-        # Sector
         'Industry Classification': 'Sector', 'Industry/Rating': 'Sector', 'Industry': 'Sector',
-        # Weight
         '% to Net Assets': 'Weight (%)', 'Weightage': 'Weight (%)', '% of Total AUM': 'Weight (%)',
         '% to NAV': 'Weight (%)', '% of Net Assets': 'Weight (%)', '% to AUM': 'Weight (%)',
         'Market value / Net Assets (%)': 'Weight (%)', '% to Total Net Assets': 'Weight (%)',
-        # ISIN
         'ISIN Code': 'ISIN', 'ISIN': 'ISIN', 'Isin': 'ISIN', 'Security ISIN': 'ISIN',
-        # Quantity
         'Quantity': 'Quantity', 'Qty': 'Quantity', 'No. of Shares': 'Quantity', 'Shares': 'Quantity',
-        # Market Value
         'Market/Fair Value(Rs. in Lakhs)': 'Market Value (Lakhs)',
         'Market value(Rs. in Lakhs)': 'Market Value (Lakhs)',
         'Market Value (Rs. in Lakhs)': 'Market Value (Lakhs)',
@@ -42,51 +36,49 @@ VALID_MONTHS = {
 
 def validate_and_parse_filename(filename: str):
     """
-    Validates and parses filename format: AMC-SchemeName-Month-Year
+    Validates strictly for: AMC_SchemeName_Month_Year_Other
+    Example: Navi_NiftyNext50_June_2026_abc.xlsx
     """
     try:
+        # Strip trailing extension variants and sheet suffixes
         clean_name = filename
         clean_name = re.sub(r'\.(xlsx|xls|csv)(\s*-\s*[A-Za-z0-9_]+)?\.(csv|xlsx|xls)$', '', clean_name, flags=re.IGNORECASE)
         clean_name = re.sub(r'\.(xlsx|xls|csv)$', '', clean_name, flags=re.IGNORECASE)
         clean_name = re.sub(r'\s*-\s*(Sheet\d+|SC|JBFLEXI).*$', '', clean_name, flags=re.IGNORECASE)
 
-        clean_name = clean_name.replace('–', '-').replace('—', '-').replace('_', '-')
-        clean_name = re.sub(r'\s*-\s*', '-', clean_name).strip('-')
+        # Split by underscore
+        tokens = [t.strip() for t in clean_name.split('_') if t.strip()]
 
-        tokens = [t.strip() for t in clean_name.split('-') if t.strip()]
-        if len(tokens) < 3:
+        # Must have at least 5 segments: AMC, SchemeName, Month, Year, Other
+        if len(tokens) < 5:
             return None
 
         amc = tokens[0]
-        year, month, year_idx, month_idx = None, None, None, None
+        other = tokens[-1]
+        year = tokens[-2]
+        month_raw = tokens[-3].lower()
 
-        for idx in range(len(tokens) - 1, 0, -1):
-            if re.match(r'^\d{4}$', tokens[idx]):
-                year = tokens[idx]
-                year_idx = idx
-                break
-
-        if year_idx is not None:
-            for idx in range(year_idx - 1, 0, -1):
-                cleaned_m = tokens[idx].lower()
-                if cleaned_m in VALID_MONTHS:
-                    month = VALID_MONTHS[cleaned_m]
-                    month_idx = idx
-                    break
-
-        if not year or not month or month_idx is None:
+        # Validate Year (4 digits) and Month
+        if not (year.isdigit() and len(year) == 4):
             return None
 
-        scheme_tokens = tokens[1:month_idx]
-        scheme = " ".join(scheme_tokens) if scheme_tokens else "Default Scheme"
+        if month_raw not in VALID_MONTHS:
+            return None
+
+        month = VALID_MONTHS[month_raw]
+
+        # Scheme name is all tokens between AMC and Month
+        scheme_tokens = tokens[1:-3]
+        scheme = "_".join(scheme_tokens) if scheme_tokens else "DefaultScheme"
 
         return {
             "amc": str(amc),
             "scheme": str(scheme),
             "month": str(month),
             "year": str(year),
+            "other": str(other),
             "period": f"{month} {year}",
-            "display_name": f"{amc} - {scheme} ({month} {year})"
+            "display_name": f"{amc} - {scheme} ({month} {year}) [{other}]"
         }
     except Exception:
         return None
@@ -166,7 +158,7 @@ def load_and_normalize(uploaded_file):
             errors='coerce'
         ).fillna(0.0)
 
-        # Clean Market Value (Lakhs) if present
+        # Clean Market Value
         if 'Market Value (Lakhs)' in df.columns:
             df['Market Value (Lakhs)'] = pd.to_numeric(
                 df['Market Value (Lakhs)'].astype(str).str.replace(r'[^0-9.]', '', regex=True),
@@ -175,7 +167,7 @@ def load_and_normalize(uploaded_file):
         else:
             df['Market Value (Lakhs)'] = 0.0
 
-        # Clean Quantity if present
+        # Clean Quantity
         if 'Quantity' in df.columns:
             df['Quantity'] = pd.to_numeric(
                 df['Quantity'].astype(str).str.replace(r'[^0-9]', '', regex=True),
@@ -187,7 +179,6 @@ def load_and_normalize(uploaded_file):
         cols_to_keep = ['ISIN', 'Stock Name', 'Sector', 'Weight (%)', 'Market Value (Lakhs)', 'Quantity']
         df = df[cols_to_keep].dropna(subset=['Stock Name']).reset_index(drop=True)
 
-        # Aggregate duplicate / split entries for the same ISIN
         agg_map = {
             'Weight (%)': 'sum',
             'Market Value (Lakhs)': 'sum',
